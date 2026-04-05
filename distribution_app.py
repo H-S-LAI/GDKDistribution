@@ -11,10 +11,10 @@ import io
 # 常數
 # ════════════════════════════════════════════════════════════════
 
-G1_STORES = ['彰草店', '金美店', '日華店']
-G2_STORES = ['北屯店', '向上店', '五權店', '太平店', '大雅店', '漢口店']
-G3_STORES = ['金馬店', '正德店', '大埔店', '三民店', '線東店', '彰美店',
-             '過溝店', '彰鹿店', '泰和店', '精誠店', '秀二店', '花壇店', '華山店']
+G1_STORES = ['日華店', '金美店', '彰草店']
+G2_STORES = ['五權店', '向上店', '大雅店', '漢口店', '北屯店', '太平店']
+G3_STORES = ['彰美店', '精誠店', '過溝店', '金馬店', '泰和店', '三民店',
+             '華山店', '大埔店', '秀二店', '花壇店', '彰鹿店', '正德店', '線東店']
 
 G1_ITEMS  = ['特幼', '幼大口', '多粒', '多大口', '幼菁', '雙子星']
 G2_ITEMS  = ['特幼', '多菁',   '幼大口', '多粒', '多大口', '幼菁', '雙子星']
@@ -351,43 +351,62 @@ tabs = st.tabs([f"📍 {g}" for g, _, _ in GROUPS])
 for tab, (gname, stores, items) in zip(tabs, GROUPS):
     with tab:
 
-        # 配貨差額表（可編輯）
+        # CSS：放大 number_input 字體
+        st.markdown("""<style>
+[data-testid="stNumberInput"] input {
+    font-size: 20px !important; text-align: center !important; padding: 2px 0 !important;
+}
+[data-testid="stNumberInput"] button svg { width:18px; height:18px; }
+</style>""", unsafe_allow_html=True)
+
+        # 配貨差額表（number_input 格子）
         st.markdown("#### 配貨差額　🔴 補　🔵 退")
-        store_cols = [s.replace('店', '') for s in stores]
-        dist_df = make_df(stores, items, dist, show_total=True)
+        shorts = [s.replace('店', '') for s in stores]
+        n = len(stores)
+        cw = [1.4] + [1.0] * n + [0.8]   # 品項 | 各店 | 合計
 
-        edited = st.data_editor(
-            dist_df,
-            use_container_width=True,
-            key=f"edit_{gname}",
-            disabled=['合計'],
-            column_config={
-                **{col: st.column_config.NumberColumn(col, format="%+d", step=5)
-                   for col in store_cols},
-                '合計': st.column_config.NumberColumn('合計', format="%+d", disabled=True),
-            }
-        )
+        # 表頭
+        hdr = st.columns(cw)
+        hdr[0].markdown("**品項**")
+        for i, s in enumerate(shorts, 1):
+            hdr[i].markdown(f"**{s}**")
+        hdr[-1].markdown("**合計**")
+        st.markdown('<hr style="margin:2px 0 6px 0">', unsafe_allow_html=True)
 
-        # 重新計算合計（反映手動編輯）
-        edited['合計'] = edited[store_cols].sum(axis=1)
-
-        # 平衡提示列
-        unbalanced = [(item, int(edited.loc[item, '合計'])) for item in items
-                      if int(edited.loc[item, '合計']) != 0]
-        if unbalanced:
-            badges = "　".join(
-                f"**{item}** `{'+' if v > 0 else ''}{v}`" for item, v in unbalanced
+        # 資料列
+        row_totals = {}
+        for item in items:
+            row = st.columns(cw)
+            row[0].markdown(f"<div style='padding-top:10px;font-size:17px'><b>{item}</b></div>",
+                            unsafe_allow_html=True)
+            vals = []
+            for i, store in enumerate(stores, 1):
+                v = row[i].number_input(
+                    "x", key=f"dist_{gname}_{store}_{item}",
+                    value=int(dist.get(store, {}).get(item, 0)),
+                    step=5, label_visibility="collapsed"
+                )
+                vals.append((store, int(v)))
+            total = sum(v for _, v in vals)
+            row_totals[item] = total
+            color = "#aaa" if total == 0 else ("#d32f2f" if total > 0 else "#1565c0")
+            sign  = "+" if total >= 0 else ""
+            row[-1].markdown(
+                f"<div style='text-align:right;color:{color};font-weight:700;"
+                f"font-size:20px;padding-top:8px'>{sign}{total}</div>",
+                unsafe_allow_html=True
             )
+            # 同步回 dist
+            for store, v in vals:
+                dist[store][item] = v
+
+        # 平衡提示
+        unbalanced = [(it, t) for it, t in row_totals.items() if t != 0]
+        if unbalanced:
+            badges = "　".join(f"**{it}** `{'+' if t>0 else ''}{t}`" for it, t in unbalanced)
             st.warning(f"⚠️ 以下品項合計不為零：{badges}", icon="⚠️")
         else:
             st.success("✅ 所有品項加總為零", icon="✅")
-
-        # 同步回 dist（讓匯出拿到手動修改後的值）
-        for store in stores:
-            short = store.replace('店', '')
-            for item in items:
-                if short in edited.columns and item in edited.index:
-                    dist[store][item] = int(edited.loc[item, short])
 
         # 參考資訊（摺疊）
         with st.expander("📊 參考資訊（3日均量 ／ 現有庫存）"):
