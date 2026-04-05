@@ -183,21 +183,28 @@ def calculate(inventory, history, n_avg=3):
             allocations  = proportional_alloc(total_avail, store_avgs)
             for store, alloc in zip(stores, allocations):
                 current = inventory.get(store, {}).get(item, 0)
-                dist[store][item] = alloc - current
+                dist[store][item] = round5(alloc - current)
 
     return dist, avg
+
+def round5(x):
+    """四捨五入到最近的5的倍數"""
+    return int(round(x / 5) * 5) if x != 0 else 0
 
 # ════════════════════════════════════════════════════════════════
 # 建立顯示用 DataFrame
 # ════════════════════════════════════════════════════════════════
 
-def make_df(stores, items, values):
+def make_df(stores, items, values, show_total=False):
     """values: {store: {item: number}}，回傳 DataFrame（rows=items, cols=store縮寫）"""
-    return pd.DataFrame(
+    df = pd.DataFrame(
         {s.replace('店', ''): {it: values.get(s, {}).get(it, 0) for it in items}
          for s in stores},
         index=items
     )
+    if show_total:
+        df['合計'] = df.sum(axis=1)
+    return df
 
 def style_dist(df):
     def _color(val):
@@ -322,17 +329,34 @@ for tab, (gname, stores, items) in zip(tabs, GROUPS):
 
         # 配貨差額表（可編輯）
         st.markdown("#### 配貨差額　🔴 補　🔵 退")
-        dist_df = make_df(stores, items, dist)
+        store_cols = [s.replace('店', '') for s in stores]
+        dist_df = make_df(stores, items, dist, show_total=True)
 
         edited = st.data_editor(
             dist_df,
             use_container_width=True,
             key=f"edit_{gname}",
+            disabled=['合計'],
             column_config={
-                col: st.column_config.NumberColumn(col, format="%+d")
-                for col in dist_df.columns
+                **{col: st.column_config.NumberColumn(col, format="%+d", step=5)
+                   for col in store_cols},
+                '合計': st.column_config.NumberColumn('合計', format="%+d", disabled=True),
             }
         )
+
+        # 重新計算合計（反映手動編輯）
+        edited['合計'] = edited[store_cols].sum(axis=1)
+
+        # 平衡提示列
+        unbalanced = [(item, int(edited.loc[item, '合計'])) for item in items
+                      if int(edited.loc[item, '合計']) != 0]
+        if unbalanced:
+            badges = "　".join(
+                f"**{item}** `{'+' if v > 0 else ''}{v}`" for item, v in unbalanced
+            )
+            st.warning(f"⚠️ 以下品項合計不為零：{badges}", icon="⚠️")
+        else:
+            st.success("✅ 所有品項加總為零", icon="✅")
 
         # 同步回 dist（讓匯出拿到手動修改後的值）
         for store in stores:
