@@ -181,15 +181,39 @@ def calculate(inventory, history, n_avg=3):
             total_avail  = sum(inventory.get(s, {}).get(item, 0) for s in stores)
             store_avgs   = [avg[s].get(item, 0) for s in stores]
             allocations  = proportional_alloc(total_avail, store_avgs)
-            for store, alloc in zip(stores, allocations):
-                current = inventory.get(store, {}).get(item, 0)
-                dist[store][item] = round5(alloc - current)
+            currents  = [inventory.get(s, {}).get(item, 0) for s in stores]
+            raw_dists = [alloc - cur for alloc, cur in zip(allocations, currents)]
+            balanced  = round5_balanced(raw_dists)
+            for store, d in zip(stores, balanced):
+                dist[store][item] = d
 
     return dist, avg
 
 def round5(x):
     """四捨五入到最近的5的倍數"""
     return int(round(x / 5) * 5) if x != 0 else 0
+
+def round5_balanced(values):
+    """
+    將一組加總為0的整數各自捨入到5的倍數，
+    並調整誤差最大的店來確保加總仍為0。
+    """
+    rounded = [round5(v) for v in values]
+    residual = sum(rounded)   # 理論上應為0，但捨入後可能差±5或±10...
+    if residual == 0:
+        return rounded
+    # 計算每家店的捨入誤差（rounded - raw），調整誤差最大的那些店
+    errors = [rounded[i] - values[i] for i in range(len(values))]
+    steps  = residual // 5   # 要補正幾個 ±5
+    if steps > 0:
+        # sum太大 → 把捨入正誤差最大的店各減5
+        order = sorted(range(len(values)), key=lambda i: -errors[i])
+    else:
+        # sum太小 → 把捨入負誤差最大的店各加5
+        order = sorted(range(len(values)), key=lambda i:  errors[i])
+    for i in range(abs(steps)):
+        rounded[order[i % len(order)]] -= 5 * (1 if steps > 0 else -1)
+    return rounded
 
 # ════════════════════════════════════════════════════════════════
 # 建立顯示用 DataFrame
